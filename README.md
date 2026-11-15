@@ -24,7 +24,33 @@ includes inference operators and algorithms across model domains.
 
 ## Status
 
-Initial project setup. Engine implementation and public APIs are planned.
+The native CUDA build and toolchain smoke check are available. Operator-specific
+behavior and validation are documented alongside each implementation.
+
+## Native CUDA build
+
+Use Linux x86_64, Python 3.12, CMake 3.24 or newer, and a C++20 host compiler.
+After installing the Python environment below, bootstrap the project-local
+CUDA 12.8.1 compiler components and build:
+
+```sh
+python3.12 scripts/fetch_cuda_toolkit.py
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_MAKE_PROGRAM="$PWD/.venv/bin/ninja"
+cmake --build build --parallel 2
+ctest --test-dir build --output-on-failure
+```
+
+The bootstrap verifies NVIDIA's redistributable SHA256 hashes and installs
+under ignored `.toolchains/`; it does not install or change a system driver.
+An existing toolkit can be selected with `-DCMAKE_CUDA_COMPILER=/path/to/nvcc`.
+GPU access is required to run the CUDA tests; CTest reports a skip when no
+device is available. A skipped test is not GPU validation.
+
+Code generation defaults to SM89. Override `-DCMAKE_CUDA_ARCHITECTURES=...`
+for another supported GPU. CUTLASS v4.8.0 headers are downloaded by CMake from
+commit `098de2a652cf8f00fd70b2df54051c7eccbb855a`, with an archive SHA256 check.
+The C++ core does not depend on Torch; its adapter is an optional build target.
 
 ## Python environment
 

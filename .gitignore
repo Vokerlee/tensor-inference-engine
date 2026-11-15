@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project-local native toolchain and CMake outputs
+/.toolchains/
+/build*/
