@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+export PATH="$root/.venv/bin:$PATH"
+status=0
+
+check() {
+    local tool="$1" script="$2"
+
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "pre-commit: $tool not found, skipping its format check." >&2
+        echo "            install with: .venv/bin/python -m pip install -r requirements.txt" >&2
+        return 0
+    fi
+
+    if ! "$root/scripts/$script" --check; then
+        echo >&2
+        echo "pre-commit: files above are not formatted. Fix with:" >&2
+        echo "    $root/scripts/$script" >&2
+        status=1
+    fi
+}
+
+check gersemi format-cmake.sh
+check clang-format format-cpp.sh
+
+exit $status

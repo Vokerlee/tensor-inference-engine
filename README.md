@@ -75,6 +75,25 @@ CUDA toolkit providing `nvcc`; the planned baseline uses CUDA 12.8. The NVIDIA
 driver is managed separately. These environment files do not add an operator
 implementation or claim that CUDA compilation has been validated.
 
+## Formatting
+
+The pinned requirements include clang-format 22.1.8 for C++/CUDA and gersemi
+0.28.0 for CMake. Both use four spaces per indentation level. The scripts
+prefer tools installed in this repository's `.venv` and format tracked files
+only, excluding downloaded dependencies and build outputs.
+
+```sh
+scripts/format-cpp.sh
+scripts/format-cpp.sh --check
+scripts/format-cmake.sh
+scripts/format-cmake.sh --check
+scripts/install-hooks.sh
+```
+
+Use these scripts for formatting, including `.cu` and `.cuh` files. Style lives
+in `.clang-format` and `.gersemirc`. The optional hook runs both format checks
+before commits; install the pinned requirements before enabling it.
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
