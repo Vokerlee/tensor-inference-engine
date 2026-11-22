@@ -5,6 +5,7 @@ an estimate of a custom hardware controller's cost.
 """
 
 from itertools import combinations
+from math import prod
 
 import torch
 
@@ -16,7 +17,7 @@ def group_gram(weight: torch.Tensor) -> torch.Tensor:
     """Return four-input-channel Gram blocks for a weight matrix [K, N]."""
     if weight.ndim != 2 or weight.shape[0] % 4:
         raise ValueError("weight must have shape [K, N] with K divisible by four")
-    rows = weight.float().reshape(-1, 4, weight.shape[1])
+    rows = weight.float().reshape(weight.shape[0] // 4, 4, weight.shape[1])
     return rows @ rows.transpose(-1, -2)
 
 
@@ -31,7 +32,7 @@ def quantize_symmetric(x: torch.Tensor, bits: int, group_size: int = 32) -> torc
         raise ValueError("use 4/8 bits and a positive group size divisible by four")
     if x.ndim == 0 or x.shape[-1] % group_size:
         raise ValueError("the last dimension must be divisible by group_size")
-    grouped = x.float().reshape(*x.shape[:-1], -1, group_size)
+    grouped = x.float().reshape(*x.shape[:-1], x.shape[-1] // group_size, group_size)
     maximum = grouped.abs().amax(dim=-1, keepdim=True)
     limit = (1 << (bits - 1)) - 1
     scale = torch.where(maximum > 0, maximum / limit, 1.0)
@@ -49,9 +50,9 @@ def coherence(gram: torch.Tensor) -> torch.Tensor:
 
 def quantize_affine(x: torch.Tensor, bits: int = 4, group_size: int = 32) -> torch.Tensor:
     """Unsigned affine INT reconstruction; include zero, integer zero point."""
-    if bits not in (4, 8) or group_size <= 0 or x.shape[-1] % group_size:
+    if x.ndim == 0 or bits not in (4, 8) or group_size <= 0 or x.shape[-1] % group_size:
         raise ValueError("use4/8 bits and a dividing positive group size")
-    values = x.float().reshape(*x.shape[:-1], -1, group_size)
+    values = x.float().reshape(*x.shape[:-1], x.shape[-1] // group_size, group_size)
     low = values.amin(-1, keepdim=True).clamp_max(0)
     high = values.amax(-1, keepdim=True).clamp_min(0)
     limit = (1 << bits) - 1
@@ -66,9 +67,9 @@ def quantize_e2m1(x: torch.Tensor, group_size: int = 32) -> torch.Tensor:
 
     This is a numerical baseline, not NVFP4/MXFP4's complete scaling recipe.
     """
-    if group_size <= 0 or x.shape[-1] % group_size:
+    if x.ndim == 0 or group_size <= 0 or x.shape[-1] % group_size:
         raise ValueError("group size must be positive and divide the last dimension")
-    values = x.float().reshape(*x.shape[:-1], -1, group_size)
+    values = x.float().reshape(*x.shape[:-1], x.shape[-1] // group_size, group_size)
     maximum = values.abs().amax(-1, keepdim=True)
     scale = torch.where(maximum > 0, maximum / 6, 1.0)
     normalized = (values.abs() / scale).contiguous()
@@ -107,7 +108,7 @@ def select_2of4(
     if gate_delta <= 0:
         raise ValueError("gate_delta must be positive")
     original_shape = x.shape
-    values = x.float().reshape(-1, gram.shape[0], 4)
+    values = x.float().reshape(prod(original_shape[:-1]), gram.shape[0], 4)
     quantized = reconstructed.float().reshape_as(values)
     diagonal = gram.diagonal(dim1=-2, dim2=-1)
 
@@ -141,10 +142,10 @@ def select_2of4(
         masks[pair, i] = True
         masks[pair, j] = True
     selected = quantized * masks[indices]
-    return selected.reshape(original_shape), indices.reshape(*original_shape[:-1], -1)
+    return selected.reshape(original_shape), indices.reshape(*original_shape[:-1], x.shape[-1] // 4)
 
 
 def group_loss(error: torch.Tensor, gram: torch.Tensor) -> torch.Tensor:
     """Exact per-quartet output error; its sum omits inter-quartet terms."""
-    values = error.float().reshape(-1, gram.shape[0], 4)
+    values = error.float().reshape(prod(error.shape[:-1]), gram.shape[0], 4)
     return torch.einsum("bgi,gij,bgj->bg", values, gram, values).clamp_min(0)

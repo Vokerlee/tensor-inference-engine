@@ -75,3 +75,19 @@ def test_affine_and_fp4_formats():
     torch.testing.assert_close(selection.quantize_e2m1(-values, 8), -expected)
     for function in [selection.quantize_affine, selection.quantize_e2m1]:
         assert torch.count_nonzero(function(torch.zeros(2, 32))) == 0
+
+
+@pytest.mark.parametrize("shape", [(0, 32), (2, 0), (0,)])
+def test_empty_reference_shapes(shape):
+    x = torch.empty(shape)
+    for function in [lambda value: selection.quantize_symmetric(value, 4),
+                     selection.quantize_affine, selection.quantize_e2m1]:
+        assert function(x).shape == x.shape
+    gram = selection.group_gram(torch.zeros(shape[-1], 19))
+    output, pairs = selection.select_2of4(x, x, gram)
+    assert output.shape == x.shape
+    assert pairs.numel() == 0
+    assert selection.group_loss(output - x, gram).numel() == 0
+    for function in [selection.quantize_affine, selection.quantize_e2m1]:
+        with pytest.raises(ValueError):
+            function(torch.tensor(1.))
