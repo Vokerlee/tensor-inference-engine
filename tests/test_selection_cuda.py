@@ -70,3 +70,41 @@ def test_stream_graph_empty_and_invalid():
         torch.ops.tensor_inference_engine.select_2of4(x, q, gram)
     with pytest.raises(RuntimeError, match="contiguous FP32"):
         torch.ops.tensor_inference_engine.select_2of4(x.bfloat16(), q, packed)
+
+
+@pytest.mark.parametrize("bits", [4, 8])
+@pytest.mark.parametrize("policy", [0, 1, 2])
+def test_fused_preparation(bits, policy):
+    torch.manual_seed(11)
+    x = torch.randn(197, 96, device="cuda", dtype=torch.bfloat16)
+    x[:3] = 0
+    weight = torch.randn(96, 29, device="cuda")
+    gram = selection.group_gram(weight)
+    upper = torch.triu_indices(4, 4, device="cuda")
+    packed = gram[:, upper[0], upper[1]].contiguous()
+    quantized = selection.quantize_symmetric(x, bits).bfloat16()
+    output, pairs = torch.ops.tensor_inference_engine.prepare_activations(
+        x, None if policy == 0 else packed, bits, policy)
+    if policy == 0:
+        torch.testing.assert_close(output, quantized, rtol=0, atol=0)
+        assert torch.all(pairs == 255)
+    else:
+        expected, _ = selection.select_2of4(x, quantized, gram, "diagonal" if policy == 1 else "gram")
+        if policy == 1:
+            diagonal = gram.diagonal(dim1=-2, dim2=-1)
+            actual_loss = ((output.float() - x.float()).reshape(197, -1, 4).square() * diagonal).sum(-1)
+            expected_loss = ((expected - x.float()).reshape(197, -1, 4).square() * diagonal).sum(-1)
+        else:
+            actual_loss = selection.group_loss(output.float() - x.float(), gram)
+            expected_loss = selection.group_loss(expected - x.float(), gram)
+        torch.testing.assert_close(actual_loss, expected_loss, rtol=3e-5, atol=3e-5)
+    stream = torch.cuda.Stream()
+    with torch.cuda.stream(stream):
+        torch.cuda._sleep(1_000_000)
+        new_x = x.clone()
+        streamed, _ = torch.ops.tensor_inference_engine.prepare_activations(
+            new_x, None if policy == 0 else packed, bits, policy)
+    stream.synchronize()
+    torch.testing.assert_close(streamed, output)
+    torch.library.opcheck(torch.ops.tensor_inference_engine.prepare_activations.default,
+                          (x, None if policy == 0 else packed, bits, policy))
