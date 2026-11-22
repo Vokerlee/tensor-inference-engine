@@ -78,3 +78,30 @@ def test_stream_graph_contracts_and_empty_inputs():
     assert empty.numel() == empty_modes.numel() == 0
     with pytest.raises(RuntimeError, match="positive finite"):
         torch.ops.tensor_inference_engine.adaptive_precision(x, packed, float("nan"))
+
+
+@pytest.mark.parametrize("geometry", [2, 3])
+@pytest.mark.parametrize("fp4", [False, True])
+@pytest.mark.parametrize("tolerance", [1e-20, .0001, .01])
+def test_separate_error_and_signal_geometry(geometry, fp4, tolerance):
+    x, gram, packed = data()
+    low = (selection.quantize_e2m1(x) if fp4 else selection.quantize_symmetric(x, 4)).bfloat16()
+    high = selection.quantize_symmetric(x, 8).bfloat16()
+    output, modes = torch.ops.tensor_inference_engine.adaptive_precision_geometry(
+        x, packed, tolerance, fp4, geometry)
+    for start in [0, 128]:
+        rows = slice(start, start + 128)
+        original = x[rows].float()
+
+        def loss(error, full):
+            if full:
+                return selection.group_loss(error, gram).sum()
+            return (error.reshape(-1, 24, 4).square() * gram.diagonal(dim1=-2, dim2=-1)).sum()
+
+        denominator = loss(original, geometry == 3).clamp_min(1e-30)
+        expected = (0 if loss(low[rows].float() - original, geometry == 2) / denominator <= tolerance
+                    else (1 if loss(high[rows].float() - original, False) / denominator <= tolerance else 2))
+        assert modes[start // 128, 0] == expected
+        torch.testing.assert_close(output[rows], [low, high, x][expected][rows], rtol=0, atol=0)
+    torch.library.opcheck(torch.ops.tensor_inference_engine.adaptive_precision_geometry.default,
+                          (x, packed, tolerance, fp4, geometry))
