@@ -106,3 +106,11 @@ The kernel supplies neither packed output nor low-bit matrix execution.
 Metadata generation, its lifetime and subsequent datapath support remain
 separate costs. Tests in `tests/test_precision_cuda.py` compare independent
 candidate scores across full/partial tiles, all modes, streams and graph replay.
+
+`adaptive_precision_geometry` exposes four scoring choices through its final
+integer argument:0=full,1=diagonal,2=full geometry only for the low candidate's
+quantization error,3=full geometry only for reference signal energy. All other
+terms are diagonal. Choices2/3 evaluate18 quadratic terms per quartet instead
+of30; this counts score terms, not total cycles or energy. They change the
+selection rule and need their own model-quality evaluation. The original
+`adaptive_precision` interface retains its full/diagonal behavior.
