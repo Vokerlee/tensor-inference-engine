@@ -68,3 +68,12 @@ Output values are BF16 reconstructions, with uint8 indices; they are not packed
 integer data. There is no multi-mode tile controller or sparse GEMM here.
 GPU fusion establishes implementation feasibility and latency, not custom-chip
 area, energy, or the cost of buffering at a different producer boundary.
+
+## Additional dense numerical baselines
+
+`quantize_affine` reconstructs unsigned INT4/INT8 with per-group min/max
+including zero and an integer zero point. `quantize_e2m1` reconstructs signed
+E2M1 FP4 levels with nearest-even code rounding and dynamic maximum scaling.
+Its scales stay FP32; it is not a full NVFP4/MXFP4 recipe. Both references
+require finite inputs, preserve all tensor positions and return FP32 values.
+Their scale/offset arithmetic and execution costs differ from symmetric INT.
