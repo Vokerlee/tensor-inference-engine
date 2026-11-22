@@ -47,6 +47,39 @@ def coherence(gram: torch.Tensor) -> torch.Tensor:
     return normalized.masked_fill(eye, 0).sum(dim=-1).amax(dim=-1)
 
 
+def quantize_affine(x: torch.Tensor, bits: int = 4, group_size: int = 32) -> torch.Tensor:
+    """Unsigned affine INT reconstruction; include zero, integer zero point."""
+    if bits not in (4, 8) or group_size <= 0 or x.shape[-1] % group_size:
+        raise ValueError("use4/8 bits and a dividing positive group size")
+    values = x.float().reshape(*x.shape[:-1], -1, group_size)
+    low = values.amin(-1, keepdim=True).clamp_max(0)
+    high = values.amax(-1, keepdim=True).clamp_min(0)
+    limit = (1 << bits) - 1
+    scale = torch.where(high > low, (high - low) / limit, 1.0)
+    zero_point = torch.round(-low / scale).clamp(0, limit)
+    codes = (torch.round(values / scale) + zero_point).clamp(0, limit)
+    return ((codes - zero_point) * scale).reshape(x.shape)
+
+
+def quantize_e2m1(x: torch.Tensor, group_size: int = 32) -> torch.Tensor:
+    """E2M1 values, RN ties-to-even codes, dynamic max, unquantized FP32 scale.
+
+    This is a numerical baseline, not NVFP4/MXFP4's complete scaling recipe.
+    """
+    if group_size <= 0 or x.shape[-1] % group_size:
+        raise ValueError("group size must be positive and divide the last dimension")
+    values = x.float().reshape(*x.shape[:-1], -1, group_size)
+    maximum = values.abs().amax(-1, keepdim=True)
+    scale = torch.where(maximum > 0, maximum / 6, 1.0)
+    normalized = (values.abs() / scale).contiguous()
+    levels = torch.tensor([0., .5, 1., 1.5, 2., 3., 4., 6.], device=x.device)
+    boundaries = torch.tensor([.25, .75, 1.25, 1.75, 2.5, 3.5, 5.], device=x.device)
+    indices = torch.bucketize(normalized, boundaries)
+    midpoint = normalized == boundaries[indices.clamp_max(6)]
+    indices = indices + (midpoint & (indices % 2 == 1)).long()
+    return (levels[indices] * values.sign() * scale).reshape(x.shape)
+
+
 def select_2of4(
     x: torch.Tensor,
     reconstructed: torch.Tensor,

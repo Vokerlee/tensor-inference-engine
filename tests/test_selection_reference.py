@@ -62,3 +62,16 @@ def test_rounding_and_contracts():
         selection.quantize_symmetric(torch.zeros(1, 31), 4)
     with pytest.raises(ValueError):
         selection.select_2of4(torch.zeros(4), torch.zeros(4), torch.zeros(2, 4, 4))
+
+
+def test_affine_and_fp4_formats():
+    positive = torch.tensor([[0., 1., 7., 15.]])
+    torch.testing.assert_close(selection.quantize_affine(positive, 4, 4), positive)
+    negative = -positive
+    torch.testing.assert_close(selection.quantize_affine(negative, 4, 4), negative)
+    values = torch.tensor([[.25, .75, 1.25, 1.75, 2.5, 3.5, 5., 6.]])
+    expected = torch.tensor([[0., 1., 1., 2., 2., 4., 4., 6.]])
+    torch.testing.assert_close(selection.quantize_e2m1(values, 8), expected)
+    torch.testing.assert_close(selection.quantize_e2m1(-values, 8), -expected)
+    for function in [selection.quantize_affine, selection.quantize_e2m1]:
+        assert torch.count_nonzero(function(torch.zeros(2, 32))) == 0
