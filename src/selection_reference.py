@@ -6,6 +6,7 @@ an estimate of a custom hardware controller's cost.
 
 from itertools import combinations
 from math import prod
+from typing import NamedTuple
 
 import torch
 
@@ -62,7 +63,9 @@ def quantize_affine(x: torch.Tensor, bits: int = 4, group_size: int = 32) -> tor
     return ((codes - zero_point) * scale).reshape(x.shape)
 
 
-def quantize_e2m1(x: torch.Tensor, group_size: int = 32) -> torch.Tensor:
+def quantize_e2m1(
+    x: torch.Tensor, group_size: int = 32, *, scale: torch.Tensor | None = None
+) -> torch.Tensor:
     """E2M1 values, RN ties-to-even codes, dynamic max, unquantized FP32 scale.
 
     This is a numerical baseline, not NVFP4/MXFP4's complete scaling recipe.
@@ -71,7 +74,10 @@ def quantize_e2m1(x: torch.Tensor, group_size: int = 32) -> torch.Tensor:
         raise ValueError("group size must be positive and divide the last dimension")
     values = x.float().reshape(*x.shape[:-1], x.shape[-1] // group_size, group_size)
     maximum = values.abs().amax(-1, keepdim=True)
-    scale = torch.where(maximum > 0, maximum / 6, 1.0)
+    if scale is None:
+        scale = torch.where(maximum > 0, maximum / 6, 1.0)
+    elif scale.shape != maximum.shape or scale.device != x.device:
+        raise ValueError("explicit scale must match the grouped amax shape and device")
     normalized = (values.abs() / scale).contiguous()
     levels = torch.tensor([0., .5, 1., 1.5, 2., 3., 4., 6.], device=x.device)
     boundaries = torch.tensor([.25, .75, 1.25, 1.75, 2.5, 3.5, 5.], device=x.device)
@@ -79,6 +85,57 @@ def quantize_e2m1(x: torch.Tensor, group_size: int = 32) -> torch.Tensor:
     midpoint = normalized == boundaries[indices.clamp_max(6)]
     indices = indices + (midpoint & (indices % 2 == 1)).long()
     return (levels[indices] * values.sign() * scale).reshape(x.shape)
+
+
+class ResidualRepresentation(NamedTuple):
+    coarse: torch.Tensor
+    residual: torch.Tensor
+    residual_shift: torch.Tensor | None
+
+
+def sparse_residual_e2m1(
+    x: torch.Tensor, group_size: int = 32, *, both_sparse: bool = False,
+    power_two: bool = False,
+) -> ResidualRepresentation:
+    """Two-stream reconstruction, not a sparse GEMM implementation.
+
+    Magnitude-selected 2:4 coarse plus dense residual is a SharQ-style baseline.
+    The two-sparse variant uses per-quartet quantization-error gain. It is an
+    adaptation of known mechanisms, not a complete published-method replica.
+    power_two restricts residual/coarse scale ratios to 2**(-shift), shift0..8;
+    neither calibration nor a learned per-model parameter is used.
+    """
+    if group_size <= 0 or group_size % 4 or x.ndim == 0 or x.shape[-1] % group_size:
+        raise ValueError("group size must divide the last dimension and be a multiple of four")
+
+    def keep_two(values, gains):
+        groups = values.reshape(*values.shape[:-1], values.shape[-1] // 4, 4)
+        scores = gains.reshape_as(groups)
+        indices = scores.argsort(dim=-1, descending=True, stable=True)[..., :2]
+        mask = torch.zeros_like(groups).scatter_(-1, indices, 1)
+        return (groups * mask).reshape_as(values)
+
+    original = x.float()
+    if both_sparse:
+        candidate = quantize_e2m1(original, group_size)
+        coarse = keep_two(candidate, 2 * original * candidate - candidate.square())
+    else:
+        coarse = quantize_e2m1(keep_two(original, original.abs()), group_size)
+    error = original - coarse
+    shift = None
+    if power_two:
+        grouped_shape = (*x.shape[:-1], x.shape[-1] // group_size, group_size)
+        maximum = original.reshape(grouped_shape).abs().amax(-1, keepdim=True)
+        remaining = error.reshape(grouped_shape).abs().amax(-1, keepdim=True)
+        coarse_scale = torch.where(maximum > 0, maximum / 6, 1.0)
+        ratio = maximum / remaining.clamp_min(torch.finfo(torch.float32).tiny)
+        shift = ratio.clamp_min(1).log2().floor().clamp(0, 8).to(torch.int32)
+        residual = quantize_e2m1(error, group_size, scale=coarse_scale * 2.0 ** (-shift))
+    else:
+        residual = quantize_e2m1(error, group_size)
+    if both_sparse:
+        residual = keep_two(residual, 2 * error * residual - residual.square())
+    return ResidualRepresentation(coarse, residual, shift)
 
 
 def select_2of4(
