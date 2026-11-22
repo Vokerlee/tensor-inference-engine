@@ -5,6 +5,7 @@ an estimate of a custom hardware controller's cost.
 """
 
 from itertools import combinations
+from functools import lru_cache
 from math import prod
 from typing import NamedTuple
 
@@ -12,6 +13,14 @@ import torch
 
 
 PAIRS = tuple(combinations(range(4), 2))
+
+
+@lru_cache(maxsize=None)
+def _e2m1_tables(device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    """Immutable device tables; initialize before CUDA graph capture."""
+    levels = torch.tensor([0., .5, 1., 1.5, 2., 3., 4., 6.], device=device)
+    boundaries = torch.tensor([.25, .75, 1.25, 1.75, 2.5, 3.5, 5.], device=device)
+    return levels, boundaries
 
 
 def group_gram(weight: torch.Tensor) -> torch.Tensor:
@@ -79,8 +88,7 @@ def quantize_e2m1(
     elif scale.shape != maximum.shape or scale.device != x.device:
         raise ValueError("explicit scale must match the grouped amax shape and device")
     normalized = (values.abs() / scale).contiguous()
-    levels = torch.tensor([0., .5, 1., 1.5, 2., 3., 4., 6.], device=x.device)
-    boundaries = torch.tensor([.25, .75, 1.25, 1.75, 2.5, 3.5, 5.], device=x.device)
+    levels, boundaries = _e2m1_tables(x.device)
     indices = torch.bucketize(normalized, boundaries)
     midpoint = normalized == boundaries[indices.clamp_max(6)]
     indices = indices + (midpoint & (indices % 2 == 1)).long()
