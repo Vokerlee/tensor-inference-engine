@@ -1,0 +1,28 @@
+# Grouped representation reference
+
+`src/selection_reference.py` is an optional Torch numerical reference. It has
+no model, dataset or research-workflow dependency. Load it with `importlib`
+when comparing activation transformations before developing a native backend.
+
+The input weight layout is `[K, N]`. Four contiguous input channels share a
+`4 x 4` receiving-weight Gram matrix. At fixed reconstructed values and scales,
+the selector compares the six possible two-of-four masks. Policies include
+magnitude, receiving-row norm, quantization-aware diagonal gain and a signed
+Gram score. Exact zero weights are handled by the coherence bound.
+
+The quantizer reconstructs symmetric INT4/INT8 with per-last-axis-group maximum
+scaling, round-to-nearest ties-to-even and signed range `[-7, 7]` / `[-127, 127]`.
+Zero groups use scale one. Finite inputs are required. Values and metadata are
+FP32; the output is reconstructed FP32, not packed low-bit execution. Format
+switching, sparse instructions and matrix-tile scheduling are not implemented.
+
+The gated policy uses the diagonal score when normalized off-diagonal row sum
+`rho <= delta / (2 + delta)`. Under exact metadata, its loss for this quartet
+and fixed candidate set is within factor `1 + delta` of the full local optimum.
+It computes both paths in this reference, so timing it does not establish the
+cost of selective hardware. Group losses omit cross-group interactions and
+do not certify whole-product or model quality. Weight-derived metadata requires
+preparation and storage; include both when assessing a deployed algorithm.
+
+Run `python -m pytest tests/test_selection_reference.py`. The tests compare
+against direct output products for all six masks, not the scalar expansion.
