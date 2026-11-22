@@ -114,3 +114,25 @@ terms are diagonal. Choices2/3 evaluate18 quadratic terms per quartet instead
 of30; this counts score terms, not total cycles or energy. They change the
 selection rule and need their own model-quality evaluation. The original
 `adaptive_precision` interface retains its full/diagonal behavior.
+
+## Two-stream numerical baselines
+
+`sparse_residual_e2m1` returns coarse and residual FP32 reconstructions, with
+an optional integer residual-scale shift. The default keeps magnitude top2
+slots in each quartet, quantizes with E2M1, then quantizes the remaining error
+as a dense E2M1 stream. With `both_sparse=True`, each stream keeps2 slots by
+quantization-error gain. `power_two=True` restricts the residual/coarse scale
+ratio to powers2^(-shift), shift0..8. All scales use only current values.
+Explicit `quantize_e2m1(..., scale=...)` scales have grouped shape
+`[...,K/group_size,1]` and must be finite and positive.
+
+These are adaptations of the sparse-backbone/residual family, with
+[SharQ](https://arxiv.org/abs/2606.26587v1) and
+[VR-SparseQuant](https://arxiv.org/abs/2611.25717v1) as relevant comparators;
+they do not reproduce either complete method or a calibrated scale recipe.
+Neither reference is a new-algorithm claim. Two products and their combination
+need an explicit execution contract: sparse+dense uses1.5 dense-product
+nonzero counts, while two2:4 streams use1.0, before metadata/scales/accumulation.
+An ordinary dense array may execute two full passes. Adding reconstructions
+before a BF16 GEMM checks numerical quality only and does not execute this
+physical two-stream schedule.
