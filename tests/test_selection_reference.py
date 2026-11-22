@@ -116,3 +116,22 @@ def test_sparse_residual_representation(both_sparse, power_two):
     zero = selection.sparse_residual_e2m1(torch.zeros_like(x), both_sparse=both_sparse,
                                             power_two=power_two)
     assert torch.count_nonzero(zero.coarse + zero.residual) == 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+@pytest.mark.parametrize("residual", [False, True])
+def test_fp4_reference_graph_replay_after_table_warmup(residual):
+    x = torch.randn(17, 64, device="cuda")
+    def evaluate():
+        if residual:
+            parts = selection.sparse_residual_e2m1(x, both_sparse=True, power_two=True)
+            return parts.coarse + parts.residual
+        return selection.quantize_e2m1(x)
+    expected = evaluate()
+    torch.cuda.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        output = evaluate()
+    x.mul_(.5)
+    graph.replay()
+    torch.testing.assert_close(output, evaluate(), rtol=0, atol=0)
