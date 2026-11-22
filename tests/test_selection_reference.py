@@ -1,0 +1,64 @@
+"""Independent finite-mask and numerical contract checks."""
+
+import importlib.util
+from pathlib import Path
+
+import pytest
+import torch
+
+
+SPEC = importlib.util.spec_from_file_location(
+    "selection_reference", Path(__file__).resolve().parents[1] / "src/selection_reference.py"
+)
+selection = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(selection)
+
+
+@pytest.mark.parametrize("bits", [4, 8])
+@pytest.mark.parametrize("policy", ["diagonal", "gram", "gated"])
+def test_matches_independent_six_mask_oracle(bits, policy):
+    torch.manual_seed(31)
+    weight = torch.randn(32, 19)
+    x = torch.randn(13, 32)
+    q = selection.quantize_symmetric(x, bits)
+    gram = selection.group_gram(weight)
+    selected, _ = selection.select_2of4(x, q, gram, policy)
+    for group in range(8):
+        block = slice(group * 4, (group + 1) * 4)
+        dense_geometry = policy == "gram" or (
+            policy == "gated" and selection.coherence(gram)[group] > 0.1 / 2.1
+        )
+        losses = []
+        for i, j in selection.PAIRS:
+            candidate = torch.zeros_like(q[:, block])
+            candidate[:, [i, j]] = q[:, block][:, [i, j]]
+            error = candidate.double() - x[:, block].double()
+            if dense_geometry:
+                loss = (error @ weight[block].double()).square().sum(-1)
+            else:
+                loss = (error.square() * weight[block].double().square().sum(-1)).sum(-1)
+            losses.append(loss)
+        actual = selected[:, block].double() - x[:, block].double()
+        actual_loss = ((actual @ weight[block].double()).square().sum(-1) if dense_geometry
+                       else (actual.square() * weight[block].double().square().sum(-1)).sum(-1))
+        torch.testing.assert_close(actual_loss, torch.stack(losses).amin(0), rtol=2e-6, atol=2e-6)
+
+
+def test_cancellation_example_and_zero_groups():
+    weight = torch.tensor([[1., 0.], [1., 0.], [0., 1.], [0., -1.]])
+    x = torch.tensor([[.9, 1., 1.1, 1.2]])
+    gram = selection.group_gram(weight)
+    actual, index = selection.select_2of4(x, x, gram)
+    assert index.item() == 0
+    torch.testing.assert_close(((actual - x) @ weight).square().sum(), torch.tensor(.01))
+    assert selection.coherence(torch.zeros_like(gram)).item() == 0
+    assert torch.isfinite(selection.quantize_symmetric(torch.zeros(2, 32), 4)).all()
+
+
+def test_rounding_and_contracts():
+    x = torch.tensor([[0., .5, 1.5, 7.]])
+    torch.testing.assert_close(selection.quantize_symmetric(x, 4, 4), torch.tensor([[0., 0., 2., 7.]]))
+    with pytest.raises(ValueError):
+        selection.quantize_symmetric(torch.zeros(1, 31), 4)
+    with pytest.raises(ValueError):
+        selection.select_2of4(torch.zeros(4), torch.zeros(4), torch.zeros(2, 4, 4))
