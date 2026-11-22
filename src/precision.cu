@@ -52,7 +52,7 @@ __device__ float quadratic(const float (&values)[4], const float* gram)
     return fmaxf(result, 0);
 }
 
-template<bool Diagonal>
+template<bool LowDiagonal, bool HighDiagonal, bool ReferenceDiagonal>
 __global__ void precision_kernel(const std::uint16_t* x, const float* gram, std::uint16_t* output,
     std::uint8_t* modes, std::int64_t rows, std::int64_t channels, float tolerance, bool fp4)
 {
@@ -92,9 +92,9 @@ __global__ void precision_kernel(const std::uint16_t* x, const float* gram, std:
                 high[i] = reconstruct(original[i], maximum, 8, false) - original[i];
             }
             const auto* g = geometry + ((group % 4) * 8 + quartet) * 10;
-            low_error += quadratic<Diagonal>(low, g);
-            high_error += quadratic<Diagonal>(high, g);
-            reference += quadratic<Diagonal>(original, g);
+            low_error += quadratic<LowDiagonal>(low, g);
+            high_error += quadratic<HighDiagonal>(high, g);
+            reference += quadratic<ReferenceDiagonal>(original, g);
         }
     }
     reduction[0][threadIdx.x] = low_error;
@@ -137,7 +137,7 @@ __global__ void precision_kernel(const std::uint16_t* x, const float* gram, std:
 
 void adaptive_precision(const std::uint16_t* x, const float* gram, std::uint16_t* output,
     std::uint8_t* modes, std::int64_t rows, std::int64_t channels, float tolerance, bool fp4,
-    bool diagonal, cudaStream_t stream)
+    PrecisionGeometry geometry, cudaStream_t stream)
 {
     if (rows < 0 || channels < 0 || channels % 32 || !std::isfinite(tolerance) || tolerance <= 0)
         throw std::invalid_argument(
@@ -146,12 +146,26 @@ void adaptive_precision(const std::uint16_t* x, const float* gram, std::uint16_t
     if (!rows || !channels)
         return;
     const dim3 grid((channels + 127) / 128, (rows + 127) / 128);
-    if (diagonal)
-        precision_kernel<true>
+    switch (geometry) {
+    case PrecisionGeometry::full:
+        precision_kernel<false, false, false>
             <<<grid, 256, 0, stream>>>(x, gram, output, modes, rows, channels, tolerance, fp4);
-    else
-        precision_kernel<false>
+        break;
+    case PrecisionGeometry::diagonal:
+        precision_kernel<true, true, true>
             <<<grid, 256, 0, stream>>>(x, gram, output, modes, rows, channels, tolerance, fp4);
+        break;
+    case PrecisionGeometry::low_error:
+        precision_kernel<false, true, true>
+            <<<grid, 256, 0, stream>>>(x, gram, output, modes, rows, channels, tolerance, fp4);
+        break;
+    case PrecisionGeometry::signal:
+        precision_kernel<true, true, false>
+            <<<grid, 256, 0, stream>>>(x, gram, output, modes, rows, channels, tolerance, fp4);
+        break;
+    default:
+        throw std::invalid_argument("unsupported precision geometry");
+    }
     const auto error = cudaGetLastError();
     if (error != cudaSuccess)
         throw std::runtime_error(std::string("precision kernel: ") + cudaGetErrorString(error));
