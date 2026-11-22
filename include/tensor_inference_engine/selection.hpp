@@ -12,4 +12,10 @@ void select_2of4(const float* x, const float* q, const float* gram, float* outpu
     std::uint8_t* pairs, std::int64_t rows, std::int64_t channels, bool diagonal,
     cudaStream_t stream);
 
+// BF16 inputs and reconstructions, scale group32, symmetric INT4/INT8.
+// policy0: dense (gram may be null, pairs255);1: diagonal2:4;2: full2:4.
+void prepare_activations(const std::uint16_t* x, const float* gram, std::uint16_t* output,
+    std::uint8_t* pairs, std::int64_t rows, std::int64_t channels, int bits, int policy,
+    cudaStream_t stream);
+
 } // namespace tensor_inference_engine
