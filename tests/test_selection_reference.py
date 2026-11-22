@@ -91,3 +91,28 @@ def test_empty_reference_shapes(shape):
     for function in [selection.quantize_affine, selection.quantize_e2m1]:
         with pytest.raises(ValueError):
             function(torch.tensor(1.))
+
+
+@pytest.mark.parametrize("both_sparse", [False, True])
+@pytest.mark.parametrize("power_two", [False, True])
+def test_sparse_residual_representation(both_sparse, power_two):
+    torch.manual_seed(47)
+    x = torch.randn(5, 64)
+    result = selection.sparse_residual_e2m1(x, both_sparse=both_sparse, power_two=power_two)
+    assert ((result.coarse.reshape(-1, 4) != 0).sum(-1) <= 2).all()
+    if both_sparse:
+        assert ((result.residual.reshape(-1, 4) != 0).sum(-1) <= 2).all()
+    coarse_error = (x - result.coarse).square().sum()
+    assert (x - result.coarse - result.residual).square().sum() < coarse_error
+    if power_two:
+        assert result.residual_shift.min() >= 0
+        assert result.residual_shift.max() <= 8
+        scale = x.reshape(5, 2, 32).abs().amax(-1, keepdim=True) / 6
+        levels = result.residual.reshape(5, 2, 32) / (scale * 2.0 ** (-result.residual_shift))
+        allowed = torch.tensor([0., .5, 1., 1.5, 2., 3., 4., 6.])
+        assert torch.cdist(levels.abs().reshape(-1, 1), allowed[:, None]).amin(-1).max() < 1e-5
+    else:
+        assert result.residual_shift is None
+    zero = selection.sparse_residual_e2m1(torch.zeros_like(x), both_sparse=both_sparse,
+                                            power_two=power_two)
+    assert torch.count_nonzero(zero.coarse + zero.residual) == 0
