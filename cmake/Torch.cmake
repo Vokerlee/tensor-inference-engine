@@ -27,6 +27,7 @@ add_library(
     tensor_inference_engine_torch
     SHARED
     "${PROJECT_SOURCE_DIR}/src/torch.cpp"
+    "${PROJECT_SOURCE_DIR}/src/torch_selection.cpp"
 )
 target_include_directories(
     tensor_inference_engine_torch
