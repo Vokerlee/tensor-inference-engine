@@ -26,3 +26,24 @@ preparation and storage; include both when assessing a deployed algorithm.
 
 Run `python -m pytest tests/test_selection_reference.py`. The tests compare
 against direct output products for all six masks, not the scalar expansion.
+
+## Native CUDA mask evaluator
+
+The optional Torch library also exports
+`torch.ops.tensor_inference_engine.select_2of4(x, reconstructed, packed_gram,
+diagonal=False)`. Inputs are contiguous FP32 matrices `[M, K]`; `K` is divisible
+by four. Pack the upper triangle of each Gram block, in row-major order, into
+`[K/4, 10]`. The result contains reconstructed FP32 values and uint8 pair indices
+`[M, K/4]`, ordered `(01, 02, 03, 12, 13, 23)`. A native independent C++/CUDA
+entry point is declared in `include/tensor_inference_engine/selection.hpp`.
+
+The evaluator issues one CUDA kernel with a scalar thread per quartet. It
+supports full or diagonal scores. Quantizer construction, metadata preparation,
+format selection, sparse packing and GEMM are separate work. This is a GPU
+implementation, not a synthesized autonomous hardware controller. Near ties
+can differ from the Torch reference due to FP32 FMA; comparisons test objective
+values. Finite inputs are required; no NaN/Inf policy is supplied.
+
+After building the Torch adapter, run
+`python -m pytest tests/test_selection_cuda.py`. Checks include stream ordering,
+graph replay, operator registration, empty inputs and objective agreement.
