@@ -29,6 +29,7 @@ add_library(
     "${PROJECT_SOURCE_DIR}/src/torch.cpp"
     "${PROJECT_SOURCE_DIR}/src/torch_selection.cpp"
     "${PROJECT_SOURCE_DIR}/src/torch_preparation.cpp"
+    "${PROJECT_SOURCE_DIR}/src/torch_precision.cpp"
 )
 target_include_directories(
     tensor_inference_engine_torch

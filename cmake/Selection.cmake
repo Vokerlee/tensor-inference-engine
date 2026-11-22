@@ -3,4 +3,5 @@ target_sources(
     PRIVATE
         "${PROJECT_SOURCE_DIR}/src/selection.cu"
         "${PROJECT_SOURCE_DIR}/src/preparation.cu"
+        "${PROJECT_SOURCE_DIR}/src/precision.cu"
 )

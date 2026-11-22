@@ -77,3 +77,32 @@ E2M1 FP4 levels with nearest-even code rounding and dynamic maximum scaling.
 Its scales stay FP32; it is not a full NVFP4/MXFP4 recipe. Both references
 require finite inputs, preserve all tensor positions and return FP32 values.
 Their scale/offset arithmetic and execution costs differ from symmetric INT.
+
+## Native block precision selection
+
+`torch.ops.tensor_inference_engine.adaptive_precision(x, packed_gram,
+tolerance=0.01, fp4=True, diagonal=False)` evaluates low4-bit, INT8 and original
+BF16 representations for each128x128 input block. Four-bit values use E2M1
+when `fp4=True`, otherwise symmetric INT4. Scales cover32 input values. The
+output is a BF16 reconstruction and a byte mode matrix `[ceil(M/128),ceil(K/128)]`:
+0=low4,1=INT8,2=originalBF16.
+
+For each candidate, the block score sums the quartet receiving-output errors
+and divides by the sum of the original quartets' receiving energies. The
+lowest-width candidate meeting the tolerance is selected. Original BF16 is
+always the fallback. Setting `diagonal=True` omits signed interactions for a
+matched cheaper score. These sums omit interactions across quartets and are
+not a whole-product or task-quality bound. Inputs, metadata and intermediate
+scores must be finite; Gram metadata represents the fixed receiving weights.
+
+One CUDA block retains a padded128x128 BF16 input in shared memory, reads its
+Gram metadata, accumulates the three scores, selects a mode and re-encodes from
+the retained values. It reads global activations once and issues no receiving
+GEMM. Shared storage is approximately41KB per block, including bank padding,
+maxima, metadata and reductions. This is a GPU resource count, not an ASIC
+area estimate. Both candidate scoring and final encoding contribute work.
+
+The kernel supplies neither packed output nor low-bit matrix execution.
+Metadata generation, its lifetime and subsequent datapath support remain
+separate costs. Tests in `tests/test_precision_cuda.py` compare independent
+candidate scores across full/partial tiles, all modes, streams and graph replay.
