@@ -18,4 +18,9 @@ void prepare_activations(const std::uint16_t* x, const float* gram, std::uint16_
     std::uint8_t* pairs, std::int64_t rows, std::int64_t channels, int bits, int policy,
     cudaStream_t stream);
 
+// One decision per128x128 input block; modes0=low4,1=INT8,2=originalBF16.
+void adaptive_precision(const std::uint16_t* x, const float* gram, std::uint16_t* output,
+    std::uint8_t* modes, std::int64_t rows, std::int64_t channels, float tolerance, bool fp4,
+    bool diagonal, cudaStream_t stream);
+
 } // namespace tensor_inference_engine

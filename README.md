@@ -27,6 +27,9 @@ includes inference operators and algorithms across model domains.
 The native CUDA build and toolchain smoke check are available. Operator-specific
 behavior and validation are documented alongside each implementation.
 
+[Grouped representation references and CUDA preparation](docs/selection-reference.md)
+cover activation formats,2:4 mask evaluation and block precision selection.
+
 ## Native CUDA build
 
 Use Linux x86_64, Python 3.12, CMake 3.24 or newer, and a C++20 host compiler.
