@@ -33,6 +33,9 @@ cover activation formats,2:4 mask evaluation and block precision selection.
 [Bounded integer segment planning](docs/integer-segments.md) provides a reusable
 scalar primitive with explicit overflow and fallback behavior.
 
+[Row-local source feedback](docs/source-feedback.md) adds a generic CUDA scan
+with original-group scales, explicit carry/rounding and complete validity counters.
+
 ## Native CUDA build
 
 Use Linux x86_64, Python 3.12, CMake 3.24 or newer, and a C++20 host compiler.
