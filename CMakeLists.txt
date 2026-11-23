@@ -54,5 +54,6 @@ endif()
 
 # Operator modules remain independently reviewable additions to the core build.
 include(cmake/Gemm.cmake OPTIONAL)
+include(cmake/IntegerSegments.cmake OPTIONAL)
 include(cmake/Selection.cmake OPTIONAL)
 include(cmake/Torch.cmake OPTIONAL)
