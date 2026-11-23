@@ -126,3 +126,60 @@ def test_meta_allocation_preserves_static_contract():
     assert terminal.shape == (2, 64) and terminal.dtype == torch.float32
     assert exponent.shape == (2, 7, 2) and exponent.dtype == torch.int32
     assert counts.shape == (3,) and counts.dtype == torch.int64
+
+
+@torch.inference_mode()
+@pytest.mark.parametrize("bits", [4, 8])
+@pytest.mark.parametrize("preserve", [False, True])
+def test_external_scales_match_independent_recurrence_and_reset_state(bits, preserve):
+    torch.manual_seed(401)
+    values = torch.randn(3, 9, 64, device="cuda").bfloat16()
+    values[:, 3, 1::2] = 0
+    alpha = torch.linspace(-0.5, 0.5, 64, device="cuda")
+    exponent = torch.randint(-6, 0, (3, 9, 2), device="cuda", dtype=torch.int32)
+    source, coefficients = values.cpu().float(), alpha.cpu()
+    scales = torch.ldexp(torch.ones_like(exponent.cpu(), dtype=torch.float32), exponent.cpu())
+    scales = scales.repeat_interleave(32, -1)
+    carry = torch.zeros(3, 64)
+    expected = torch.empty_like(source)
+    clipped = introduced = 0
+    limit = (1 << (bits - 1)) - 1
+    for column in range(9):
+        incoming = source[:, column] + coefficients * carry
+        code = (incoming / scales[:, column]).round()
+        current = code.clamp(-limit, limit) * scales[:, column]
+        carry = incoming - current
+        if preserve:
+            current = torch.where(source[:, column] == 0, 0, current)
+            carry = torch.where(source[:, column] == 0, 0, carry)
+        expected[:, column] = current
+        clipped += int((code.abs() > limit).sum())
+        introduced += int(((source[:, column] == 0) & (current != 0)).sum())
+    actual = torch.ops.tensor_inference_engine.source_feedback(values, alpha, bits, preserve, True, exponent)
+    assert torch.equal(actual[0].cpu().view(torch.int16), expected.bfloat16().view(torch.int16))
+    assert torch.equal(actual[1].cpu(), carry)
+    assert torch.equal(actual[2], exponent)
+    assert actual[3].cpu().tolist() == [clipped, introduced, 0]
+
+
+@torch.inference_mode()
+def test_live_and_external_matching_scales_are_bit_identical():
+    values = torch.randn(2, 13, 64, device="cuda").bfloat16()
+    alpha = torch.ones(64, device="cuda") * 0.5
+    live = torch.ops.tensor_inference_engine.source_feedback(values, alpha)
+    replay = torch.ops.tensor_inference_engine.source_feedback(values, alpha, 4, False, True, live[2])
+    for actual, expected in zip(replay, live):
+        assert torch.equal(actual, expected)
+
+
+@torch.inference_mode()
+def test_invalid_external_scale_exposes_failure_and_validates_metadata():
+    values = torch.ones(1, 3, 32, device="cuda", dtype=torch.bfloat16)
+    alpha = torch.zeros(32, device="cuda")
+    exponent = torch.full((1, 3, 1), 200, device="cuda", dtype=torch.int32)
+    with pytest.raises(RuntimeError, match="finite"):
+        torch.ops.tensor_inference_engine.source_feedback(values, alpha, 4, False, True, exponent)
+    result = torch.ops.tensor_inference_engine.source_feedback(values, alpha, 4, False, False, exponent)
+    assert int(result[3][2]) > 0
+    with pytest.raises(RuntimeError, match="INT32"):
+        torch.ops.tensor_inference_engine.source_feedback(values, alpha, 4, False, True, exponent.float())

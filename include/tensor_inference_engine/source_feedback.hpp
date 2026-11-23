@@ -11,6 +11,8 @@ namespace tensor_inference_engine {
 // Output q is converted once to BF16; terminal carry remains FP32. Exact-zero
 // preservation additionally emits zero and clears carry at a zero source.
 // Exponents are int32 [streams,width,channels/32]; terminal is [streams,channels].
+// Optional fixed_exponents supplies external POT scales with the same shape.
+// This overrides scale selection only; original values and feedback stay live.
 // Counts must be initialized to zero: clipping, introduced nonzeros before BF16
 // conversion, and invalid input/arithmetic events. Nonzero invalid count means
 // numerical outputs must not be consumed. Coefficients must be finite in [-1,1].
@@ -19,6 +21,6 @@ namespace tensor_inference_engine {
 void source_feedback(const std::uint16_t* source, const float* coefficient, std::uint16_t* output,
     float* terminal, std::int32_t* exponents, std::uint64_t* counts, std::int64_t streams,
     std::int64_t width, std::int64_t channels, unsigned bits, bool preserve_zeros,
-    cudaStream_t stream = nullptr);
+    cudaStream_t stream = nullptr, const std::int32_t* fixed_exponents = nullptr);
 
 } // namespace tensor_inference_engine

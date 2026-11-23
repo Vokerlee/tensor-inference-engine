@@ -13,7 +13,7 @@ namespace {
 using Result = std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>;
 
 Result allocate(const at::Tensor& values, const at::Tensor& coefficient, std::int64_t bits,
-    bool preserve_zeros, bool check_finite)
+    bool preserve_zeros, bool check_finite, const std::optional<at::Tensor>& fixed_exponents)
 {
     TORCH_CHECK(values.dim() == 3 && values.is_contiguous() &&
             values.scalar_type() == at::kBFloat16 && values.size(2) > 0 && values.size(2) % 32 == 0,
@@ -23,6 +23,16 @@ Result allocate(const at::Tensor& values, const at::Tensor& coefficient, std::in
             coefficient.device() == values.device(),
         "feedback coefficients require contiguous FP32 [channels] on the same device");
     TORCH_CHECK(bits == 4 || bits == 8, "feedback supports bits4/8");
+    if (fixed_exponents) {
+        TORCH_CHECK(fixed_exponents->dim() == 3 && fixed_exponents->is_contiguous() &&
+                fixed_exponents->scalar_type() == at::kInt &&
+                fixed_exponents->device() == values.device() &&
+                fixed_exponents->size(0) == values.size(0) &&
+                fixed_exponents->size(1) == values.size(1) &&
+                fixed_exponents->size(2) == values.size(2) / 32,
+            "fixed feedback exponents require contiguous INT32 [streams,width,channels/32] on the "
+            "same device");
+    }
     TORCH_CHECK(!at::GradMode::is_enabled() ||
             !(values.requires_grad() || coefficient.requires_grad()),
         "feedback is inference-only");
@@ -34,10 +44,11 @@ Result allocate(const at::Tensor& values, const at::Tensor& coefficient, std::in
 }
 
 Result feedback_cuda(const at::Tensor& values, const at::Tensor& coefficient, std::int64_t bits,
-    bool preserve_zeros, bool check_finite)
+    bool preserve_zeros, bool check_finite, const std::optional<at::Tensor>& fixed_exponents)
 {
     const c10::cuda::CUDAGuard guard(values.device());
-    auto result = allocate(values, coefficient, bits, preserve_zeros, check_finite);
+    auto result =
+        allocate(values, coefficient, bits, preserve_zeros, check_finite, fixed_exponents);
     tensor_inference_engine::source_feedback(
         reinterpret_cast<const std::uint16_t*>(values.const_data_ptr<at::BFloat16>()),
         coefficient.const_data_ptr<float>(),
@@ -46,7 +57,8 @@ Result feedback_cuda(const at::Tensor& values, const at::Tensor& coefficient, st
         std::get<2>(result).mutable_data_ptr<std::int32_t>(),
         reinterpret_cast<std::uint64_t*>(std::get<3>(result).mutable_data_ptr<std::int64_t>()),
         values.size(0), values.size(1), values.size(2), static_cast<unsigned>(bits), preserve_zeros,
-        c10::cuda::getCurrentCUDAStream(values.get_device()).stream()
+        c10::cuda::getCurrentCUDAStream(values.get_device()).stream(),
+        fixed_exponents ? fixed_exponents->const_data_ptr<std::int32_t>() : nullptr
     );
     TORCH_CHECK(
         !check_finite || std::get<3>(result)[2].item<std::int64_t>() == 0,
@@ -60,7 +72,7 @@ Result feedback_cuda(const at::Tensor& values, const at::Tensor& coefficient, st
 TORCH_LIBRARY_FRAGMENT(tensor_inference_engine, module)
 {
     module.def("source_feedback(Tensor values, Tensor coefficient, int bits=4, bool "
-               "preserve_zeros=False, bool check_finite=True) "
+               "preserve_zeros=False, bool check_finite=True, Tensor? fixed_exponents=None) "
                "-> (Tensor, Tensor, Tensor, Tensor)");
 }
 
