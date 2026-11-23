@@ -25,3 +25,28 @@ metadata correctness, representation changes and numerical validation.
 
 `integer_segments_native` checks emitted partitions against exhaustive choices,
 including zero groups, exponent gaps, oversized magnitudes and invalid ranges.
+
+## Fused CUDA metadata interface
+
+`integer_segments_cuda.hpp` combines row maximum/exponent metadata with window
+L1/exponent extrema and computes conservative product bounds in registers.
+Optional row-L1/window-maximum metadata supplies the tighter alternative bound.
+It plans each output window and group slice without materializing expanded
+per-pair bound tensors or accessing the original matrix operands.
+
+The optional Torch operator `integer_segment_plan` accepts contiguous int32
+statistics `[rows, groups]` and `[windows, groups]`. Its three outputs have shape
+`[rows, windows, ceil(groups/groups_per_slice)]`: byte end masks, byte oversized
+masks and Boolean validity. CUDA slices contain1..8 groups with widths2..48.
+Neither group size in elements nor window size in output columns is fixed by
+this interface.
+
+Caller-supplied statistics must bound the represented operands and follow their
+layout. Detected negative/inconsistent norms or invalid active exponent ranges
+return an invalid all-single-group fallback plan. This is not a replacement
+for correct metadata ownership. The kernel honors the caller's CUDA stream;
+the adapter also supports Meta tensors and CUDA graph capture.
+
+`integer_segments_cuda` checks fused indexing, tail slices and both bound modes
+against the scalar planner. These checks do not measure the cost of generating
+source statistics or establish a hardware energy benefit.
