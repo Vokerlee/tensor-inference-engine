@@ -37,3 +37,11 @@ Meta implementation. CPU-reference tests cover mixed coefficients, original
 scales, clipping, exact zeros, stream resets, empty dimensions, invalid values
 and repeated graph execution. GPU execution cost does not estimate a dedicated
 quantizer's latency, state implementation or energy.
+
+An optional `fixed_exponents` INT32 tensor with shape
+`[streams,width,channels/32]` overrides current-group scale selection. Inputs,
+feedback recurrence, row resets and clipping remain live. This supports caller
+supplied POT scales and exact replay tests; it does not certify that those
+scales are suitable for changed inputs. Invalid scales/arithmetic are exposed
+through the existing validation counter. Shape/dtype/device checks also apply
+to Meta allocation. Output exponents record the scales actually used.

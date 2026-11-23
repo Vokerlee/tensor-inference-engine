@@ -14,7 +14,7 @@ namespace {
 __global__ void feedback_kernel(const __nv_bfloat16* source, const float* coefficient,
     __nv_bfloat16* output, float* terminal, std::int32_t* exponents, unsigned long long* counts,
     std::int64_t streams, std::int64_t width, std::int64_t channels, float limit,
-    bool preserve_zeros)
+    bool preserve_zeros, const std::int32_t* fixed_exponents)
 {
     constexpr unsigned mask = 0xffffffffu;
     const auto lane = threadIdx.x % 32;
@@ -45,7 +45,11 @@ __global__ void feedback_kernel(const __nv_bfloat16* source, const float* coeffi
             int exponent = 0;
             float scale = 1;
             bool bad_scale = false;
-            if (lane == 0 && maximum > 0) {
+            if (lane == 0 && fixed_exponents) {
+                exponent = fixed_exponents[(row * width + column) * groups + group];
+                scale = ldexpf(1.0f, exponent);
+                bad_scale = !isfinite(scale) || scale <= 0;
+            } else if (lane == 0 && maximum > 0) {
                 const float logarithm = log2f(__fdiv_rn(maximum, limit));
                 bad_scale = !isfinite(logarithm);
                 if (!bad_scale) {
@@ -96,7 +100,7 @@ __global__ void feedback_kernel(const __nv_bfloat16* source, const float* coeffi
 void source_feedback(const std::uint16_t* source, const float* coefficient, std::uint16_t* output,
     float* terminal, std::int32_t* exponents, std::uint64_t* counts, std::int64_t streams,
     std::int64_t width, std::int64_t channels, unsigned bits, bool preserve_zeros,
-    cudaStream_t stream)
+    cudaStream_t stream, const std::int32_t* fixed_exponents)
 {
     if (streams < 0 || width < 0 || channels <= 0 || channels % 32 || (bits != 4 && bits != 8))
         throw std::invalid_argument("feedback requires aligned nonnegative shapes and bits4/8");
@@ -113,7 +117,7 @@ void source_feedback(const std::uint16_t* source, const float* coefficient, std:
     feedback_kernel<<<blocks, threads, 0, stream>>>(reinterpret_cast<const __nv_bfloat16*>(source),
         coefficient, reinterpret_cast<__nv_bfloat16*>(output), terminal, exponents,
         reinterpret_cast<unsigned long long*>(counts), streams, width, channels,
-        float((1u << (bits - 1)) - 1), preserve_zeros);
+        float((1u << (bits - 1)) - 1), preserve_zeros, fixed_exponents);
     const auto error = cudaGetLastError();
     if (error != cudaSuccess)
         throw std::runtime_error(std::string("feedback kernel: ") + cudaGetErrorString(error));
