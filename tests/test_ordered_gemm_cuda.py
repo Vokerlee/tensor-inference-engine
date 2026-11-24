@@ -117,7 +117,7 @@ def test_full_tiling_matches_indexed_contract_across_row_column_and_k_tails(prim
     torch.manual_seed(452)
     a = torch.randn(9, 259, device="cuda").bfloat16()
     b = torch.randn(259, 131, device="cuda").bfloat16()
-    dense, _ = torch.ops.tensor_inference_engine.ordered_gemm(a, b, primitive, chains)
+    dense, _ = torch.ops.tensor_inference_engine.ordered_gemm(a, b, primitive, chains, None, None, True, True)
     indices = torch.arange(dense.numel(), device="cuda")
     indexed, invalid = torch.ops.tensor_inference_engine.ordered_gemm(
         a, b, primitive, chains, indices, torch.zeros_like(dense))

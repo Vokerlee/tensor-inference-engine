@@ -15,7 +15,7 @@ using Result = std::tuple<at::Tensor, at::Tensor>;
 
 Result allocate(const at::Tensor& a, const at::Tensor& b, std::int64_t primitive_k,
     std::int64_t accumulators, const std::optional<at::Tensor>& indices,
-    const std::optional<at::Tensor>& initial, bool check_indices)
+    const std::optional<at::Tensor>& initial, bool check_indices, bool tiled)
 {
     TORCH_CHECK(a.dim() == 2 && b.dim() == 2 && a.size(1) == b.size(0),
         "ordered GEMM matrix shapes differ");
@@ -46,10 +46,10 @@ Result allocate(const at::Tensor& a, const at::Tensor& b, std::int64_t primitive
 
 Result execute(const at::Tensor& a, const at::Tensor& b, std::int64_t primitive_k,
     std::int64_t accumulators, const std::optional<at::Tensor>& indices,
-    const std::optional<at::Tensor>& initial, bool check_indices)
+    const std::optional<at::Tensor>& initial, bool check_indices, bool tiled)
 {
     const c10::cuda::CUDAGuard guard(a.device());
-    auto result = allocate(a, b, primitive_k, accumulators, indices, initial, check_indices);
+    auto result = allocate(a, b, primitive_k, accumulators, indices, initial, check_indices, tiled);
     if (indices && !indices->numel())
         return result;
     namespace tie = tensor_inference_engine;
@@ -61,7 +61,7 @@ Result execute(const at::Tensor& a, const at::Tensor& b, std::int64_t primitive_
         accumulators, indices ? indices->const_data_ptr<std::int64_t>() : nullptr,
         indices ? indices->numel() : a.size(0) * b.size(1),
         reinterpret_cast<std::uint64_t*>(std::get<1>(result).mutable_data_ptr<std::int64_t>()),
-        c10::cuda::getCurrentCUDAStream(a.get_device()).stream());
+        c10::cuda::getCurrentCUDAStream(a.get_device()).stream(), tiled);
     TORCH_CHECK(!indices || !check_indices || std::get<1>(result).item<std::int64_t>() == 0,
         "ordered GEMM indices must be in bounds and strictly increasing");
     return result;
@@ -71,10 +71,9 @@ Result execute(const at::Tensor& a, const at::Tensor& b, std::int64_t primitive_
 
 TORCH_LIBRARY_FRAGMENT(tensor_inference_engine, module)
 {
-    module.def(
-        "ordered_gemm(Tensor a, Tensor b, int primitive_k=128, int accumulators=1, "
-        "Tensor? indices=None, Tensor? initial=None, bool check_indices=True) -> (Tensor, Tensor)"
-    );
+    module.def("ordered_gemm(Tensor a, Tensor b, int primitive_k=128, int accumulators=1, "
+               "Tensor? indices=None, Tensor? initial=None, bool check_indices=True, bool "
+               "tiled=False) -> (Tensor, Tensor)");
 }
 
 TORCH_LIBRARY_IMPL(tensor_inference_engine, CUDA, module)
