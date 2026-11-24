@@ -64,7 +64,8 @@ __global__ void shift_kernel(const float* source, const std::int16_t* metadata, 
             const int raw_direction = packed & 255;
             const int direction = raw_direction >= 128 ? raw_direction - 256 : raw_direction;
             const int diagonal = (packed >> 8) & 255;
-            valid = valid && packed >= 0 && direction != -128 && diagonal <= 127;
+            valid = valid && packed >= 0 && direction != -128 && diagonal <= 127 &&
+                (direction == 0 || (diagonal > 0 && diagonal <= 2 * abs(direction) - 1));
             const int direction_exponent = 1 - abs(direction);
             const float scaled = ldexpf(original, -exponent);
             const float lower = fminf(limit, fmaxf(-limit, floorf(scaled)));

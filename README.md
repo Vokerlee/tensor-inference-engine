@@ -103,6 +103,12 @@ Use these scripts for formatting, including `.cu` and `.cuh` files. Style lives
 in `.clang-format` and `.gersemirc`. The optional hook runs both format checks
 before commits; install the pinned requirements before enabling it.
 
+## Bounded-state rounding
+
+[Plane rounding](docs/plane-rounding.md) provides generic CUDA and Torch
+interfaces for floating-metric and causal packed-shift quantization, including
+stream contracts and deferred numerical validation.
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).

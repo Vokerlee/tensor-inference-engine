@@ -33,6 +33,7 @@ add_library(
     "${PROJECT_SOURCE_DIR}/src/torch_integer_segments.cpp"
     "${PROJECT_SOURCE_DIR}/src/torch_source_feedback.cpp"
     "${PROJECT_SOURCE_DIR}/src/torch_plane_rounding.cpp"
+    "${PROJECT_SOURCE_DIR}/src/torch_plane_shift_rounding.cpp"
     "${PROJECT_SOURCE_DIR}/src/torch_ordered_gemm.cpp"
     "${PROJECT_SOURCE_DIR}/src/torch_observation.cpp"
 )

@@ -24,7 +24,8 @@ void plane_rounding(const float* source, const float* factor, const float* diago
 // Causal rank1 greedy variant. INT16 metadata [channels,planes] packs a signed
 // direction code in the low byte and a nonnegative diagonal code in the high.
 // Code0 means zero; magnitude k1..127 denotes 2**(-(k-1)); direction sign is
-// separate. Negative packed words, direction -128 and diagonal >127 are invalid.
+// separate. Require h>=u*u for a nonnegative diagonal residual. Negative packed
+// words, direction -128, diagonal >127 and violated residual bounds are invalid.
 // Greedy decisions use only RN FP32 additions/subtractions, exponent shifts and
 // comparisons after current-group scale observation. Ties retain nearest.
 // Output is emitted per plane, with one scalar state and no terminal fallback.
