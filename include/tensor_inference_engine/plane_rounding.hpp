@@ -21,4 +21,17 @@ void plane_rounding(const float* source, const float* factor, const float* diago
     std::int64_t planes, std::int64_t rows, std::int64_t channels, unsigned rank, unsigned bits,
     unsigned group, cudaStream_t stream = nullptr);
 
+// Causal rank1 greedy variant. INT16 metadata [channels,planes] packs a signed
+// direction code in the low byte and a nonnegative diagonal code in the high.
+// Code0 means zero; magnitude k1..127 denotes 2**(-(k-1)); direction sign is
+// separate. Negative packed words, direction -128 and diagonal >127 are invalid.
+// Greedy decisions use only RN FP32 additions/subtractions, exponent shifts and
+// comparisons after current-group scale observation. Ties retain nearest.
+// Output is emitted per plane, with one scalar state and no terminal fallback.
+// Third output marks any code changed from nearest, not proxy selection.
+void plane_shift_rounding(const float* source, const std::int16_t* metadata, float* reconstructed,
+    std::int32_t* exponents, std::uint8_t* changed, std::uint64_t* invalid, std::int64_t planes,
+    std::int64_t rows, std::int64_t channels, unsigned bits, unsigned group,
+    cudaStream_t stream = nullptr);
+
 } // namespace tensor_inference_engine
