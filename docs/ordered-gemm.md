@@ -13,6 +13,11 @@ The Torch adapter accepts contiguous `[M,K]`, `[K,N]` BF16 operands and returns
 `(output_fp32, invalid_indices_int64)`. This operator never rounds its matrix
 output to BF16. Empty K has a zero result; empty M/N are defined.
 
+Full outputs share4x64 operand tiles with32-element loads; each output keeps
+the declared per-primitive FMA order. Sparse outputs use compact indexed
+threads. Dense tiling and indexed execution are tested against one another
+across row, column and reduction tails.
+
 Optional sorted, unique INT64 flattened output indices compute only selected
 elements, preserving the supplied initial FP32 matrix elsewhere. The adapter
 clones initial storage. Empty selection preserves every entry. Native bounds

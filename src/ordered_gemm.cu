@@ -52,6 +52,57 @@ __global__ void kernel(Bf16Matrix a, Bf16Matrix b, float* output, std::int64_t s
     output[row * stride + column] = total;
 }
 
+// Full outputs share operand tiles. Sparse outputs use the compact index
+// kernel above; this keeps the full-reference comparison independently useful.
+template<unsigned Accumulators>
+__global__ void tiled_kernel(Bf16Matrix a, Bf16Matrix b, float* output, std::int64_t stride,
+    unsigned primitive_k, std::int64_t column_tiles)
+{
+    constexpr unsigned Rows = 4, Columns = 64, Reduction = 32;
+    __shared__ float source[Rows][Reduction];
+    __shared__ float weight[Reduction][Columns];
+    const auto row_base = (std::int64_t(blockIdx.x) / column_tiles) * Rows;
+    const auto column_base = (std::int64_t(blockIdx.x) % column_tiles) * Columns;
+    const auto local_row = threadIdx.x / Columns;
+    const auto local_column = threadIdx.x % Columns;
+    float total = 0;
+    for (std::int64_t begin = 0; begin < a.columns; begin += primitive_k) {
+        const auto end = min(a.columns, begin + primitive_k);
+        float sums[Accumulators] = {};
+        for (auto tile = begin; tile < end; tile += Reduction) {
+            for (unsigned index = threadIdx.x; index < Rows * Reduction; index += blockDim.x) {
+                const auto row = row_base + index / Reduction;
+                const auto k = tile + index % Reduction;
+                source[index / Reduction][index % Reduction] =
+                    row < a.rows && k < end ? read(a, row, k) : 0;
+            }
+            for (unsigned index = threadIdx.x; index < Reduction * Columns; index += blockDim.x) {
+                const auto k = tile + index / Columns;
+                const auto column = column_base + index % Columns;
+                weight[index / Columns][index % Columns] =
+                    k < end && column < b.columns ? read(b, k, column) : 0;
+            }
+            __syncthreads();
+            for (unsigned offset = 0; offset < Reduction; offset += Accumulators) {
+#pragma unroll
+                for (unsigned lane = 0; lane < Accumulators; ++lane)
+                    if (tile + offset + lane < end)
+                        sums[lane] = __fmaf_rn(source[local_row][offset + lane],
+                            weight[offset + lane][local_column], sums[lane]);
+            }
+            __syncthreads();
+        }
+        float partial;
+        if constexpr (Accumulators == 1)
+            partial = sums[0];
+        else
+            partial = __fadd_rn(__fadd_rn(sums[0], sums[1]), __fadd_rn(sums[2], sums[3]));
+        total = __fadd_rn(total, partial);
+    }
+    if (row_base + local_row < a.rows && column_base + local_column < b.columns)
+        output[(row_base + local_row) * stride + column_base + local_column] = total;
+}
+
 void validate(Bf16Matrix x)
 {
     if (x.rows < 0 || x.columns < 0 || x.rows > INT_MAX || x.columns > INT_MAX ||
@@ -81,11 +132,19 @@ void ordered_gemm(Bf16Matrix a, Bf16Matrix b, GemmOutput out, unsigned primitive
         return;
     if (!out.data || !invalid_count || (count + 255) / 256 > INT_MAX)
         throw std::invalid_argument("invalid ordered GEMM output/count storage");
-    const auto grid = static_cast<unsigned>((count + 255) / 256);
+    const auto columns = (b.columns + 63) / 64;
+    const auto tiles = ((a.rows + 3) / 4) * columns;
+    if (!indices && tiles > INT_MAX)
+        throw std::invalid_argument("ordered GEMM tile grid exceeds int32");
+    const auto grid = static_cast<unsigned>(indices ? (count + 255) / 256 : tiles);
     auto launch = [&]<unsigned Chains>() {
-        kernel<Chains><<<grid, 256, 0, stream>>>(a, b, static_cast<float*>(out.data),
-            out.leading_dimension, primitive_k, indices, count,
-            reinterpret_cast<unsigned long long*>(invalid_count));
+        if (indices)
+            kernel<Chains><<<grid, 256, 0, stream>>>(a, b, static_cast<float*>(out.data),
+                out.leading_dimension, primitive_k, indices, count,
+                reinterpret_cast<unsigned long long*>(invalid_count));
+        else
+            tiled_kernel<Chains><<<grid, 256, 0, stream>>>(a, b, static_cast<float*>(out.data),
+                out.leading_dimension, primitive_k, columns);
     };
     if (accumulators == 1)
         launch.operator()<1>();
