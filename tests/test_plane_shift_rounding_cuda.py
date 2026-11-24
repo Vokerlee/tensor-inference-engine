@@ -119,3 +119,23 @@ def test_nonfinite_source_does_not_silently_produce_an_accepted_result():
     metadata = torch.zeros(32, 4, dtype=torch.int16, device="cuda")
     with pytest.raises(RuntimeError, match="finite"):
         torch.ops.tensor_inference_engine.plane_shift_rounding(source, metadata)
+
+
+@torch.inference_mode()
+def test_causal_prefix_choices_can_increase_terminal_error():
+    # Independent rank-one objective: (sum_p u[p] * error[p])**2.
+    # A zero-metric lane with maximum7 fixes the INT4 group scale to1.
+    source = torch.zeros(3, 1, 32, device="cuda")
+    source[:, 0, 0] = torch.tensor([.49, .49, .509], device="cuda")
+    source[:, 0, 31] = 7
+    metadata = torch.zeros(32, 3, dtype=torch.int16, device="cuda")
+    metadata[0] = torch.tensor([770, 770, 257], dtype=torch.int16, device="cuda")
+    output, exponents, changed, invalid = torch.ops.tensor_inference_engine.plane_shift_rounding(
+        source, metadata, 4, 32)
+    assert not invalid.item() and not torch.count_nonzero(exponents)
+    assert torch.equal(output[:, 0, 0], torch.tensor([0., 1., 0.], device="cuda"))
+    direction = torch.tensor([.5, .5, 1.], device="cuda", dtype=torch.float64)
+    error = output[:, 0, 0].double() - source[:, 0, 0].double()
+    nearest = source[:, 0, 0].round().double() - source[:, 0, 0].double()
+    assert (direction @ error).square() > 10_000 * (direction @ nearest).square()
+    assert changed[0, 0].item() == 1
