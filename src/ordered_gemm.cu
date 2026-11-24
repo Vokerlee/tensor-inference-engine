@@ -118,7 +118,7 @@ void validate(Bf16Matrix x)
 
 void ordered_gemm(Bf16Matrix a, Bf16Matrix b, GemmOutput out, unsigned primitive_k,
     unsigned accumulators, const std::int64_t* indices, std::int64_t count,
-    std::uint64_t* invalid_count, cudaStream_t stream)
+    std::uint64_t* invalid_count, cudaStream_t stream, bool tiled)
 {
     validate(a);
     validate(b);
@@ -134,11 +134,11 @@ void ordered_gemm(Bf16Matrix a, Bf16Matrix b, GemmOutput out, unsigned primitive
         throw std::invalid_argument("invalid ordered GEMM output/count storage");
     const auto columns = (b.columns + 63) / 64;
     const auto tiles = ((a.rows + 3) / 4) * columns;
-    if (!indices && tiles > INT_MAX)
+    if (!indices && tiled && tiles > INT_MAX)
         throw std::invalid_argument("ordered GEMM tile grid exceeds int32");
-    const auto grid = static_cast<unsigned>(indices ? (count + 255) / 256 : tiles);
+    const auto grid = static_cast<unsigned>(indices || !tiled ? (count + 255) / 256 : tiles);
     auto launch = [&]<unsigned Chains>() {
-        if (indices)
+        if (indices || !tiled)
             kernel<Chains><<<grid, 256, 0, stream>>>(a, b, static_cast<float*>(out.data),
                 out.leading_dimension, primitive_k, indices, count,
                 reinterpret_cast<unsigned long long*>(invalid_count));

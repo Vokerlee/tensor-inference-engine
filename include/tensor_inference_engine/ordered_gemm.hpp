@@ -13,6 +13,6 @@ namespace tensor_inference_engine {
 // invalid_count points to a caller-zeroed device uint64; all storage is borrowed.
 void ordered_gemm(Bf16Matrix a, Bf16Matrix b, GemmOutput out, unsigned primitive_k,
     unsigned accumulators, const std::int64_t* indices, std::int64_t count,
-    std::uint64_t* invalid_count, cudaStream_t stream = nullptr);
+    std::uint64_t* invalid_count, cudaStream_t stream = nullptr, bool tiled = false);
 
 } // namespace tensor_inference_engine
