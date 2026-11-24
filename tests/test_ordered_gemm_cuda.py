@@ -108,3 +108,18 @@ def test_meta_contract_rejects_wrong_dtype_and_missing_sparse_initial():
         torch.ops.tensor_inference_engine.ordered_gemm(a.float(), b)
     with pytest.raises(RuntimeError, match="initial"):
         torch.ops.tensor_inference_engine.ordered_gemm(a, b, 128, 1, torch.empty(0, device="meta", dtype=torch.int64))
+
+
+@torch.inference_mode()
+@pytest.mark.parametrize("primitive", [7, 127, 128])
+@pytest.mark.parametrize("chains", [1, 4])
+def test_full_tiling_matches_indexed_contract_across_row_column_and_k_tails(primitive, chains):
+    torch.manual_seed(452)
+    a = torch.randn(9, 259, device="cuda").bfloat16()
+    b = torch.randn(259, 131, device="cuda").bfloat16()
+    dense, _ = torch.ops.tensor_inference_engine.ordered_gemm(a, b, primitive, chains)
+    indices = torch.arange(dense.numel(), device="cuda")
+    indexed, invalid = torch.ops.tensor_inference_engine.ordered_gemm(
+        a, b, primitive, chains, indices, torch.zeros_like(dense))
+    assert not invalid.item()
+    assert torch.equal(dense.view(torch.int32), indexed.view(torch.int32))
