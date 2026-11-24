@@ -43,3 +43,12 @@ rejected. Nondefault CUDA streams are supported.
 
 One CUDA kernel is an experimental execution implementation. Its duration does
 not specify the latency, ports, bandwidth or energy of another processor.
+
+A directed example makes the causal tradeoff explicit. On a unit grid, take
+source coordinates(0.49,0.49,0.509), direction u=(0.5,0.5,1), and h=u².
+Nearest gives codes(0,0,1) and a final projected error about0.001. Prefix-greedy
+rounding emits(0,1,0), producing a final projected error about-0.499. Every
+coefficient is a power of two and the implied diagonal residual is zero.
+Earlier local decisions cannot anticipate the final cancellation. The native
+test checks this independent objective; the causal operator must not be used
+as if it had the floating operator's completed-proxy fallback guarantee.
