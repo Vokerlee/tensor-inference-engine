@@ -1,6 +1,8 @@
 target_sources(
     tensor_inference_engine
-    PRIVATE "${PROJECT_SOURCE_DIR}/src/plane_rounding.cu"
+    PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/plane_rounding.cu"
+        "${PROJECT_SOURCE_DIR}/src/plane_shift_rounding.cu"
 )
 if(BUILD_TESTING)
     add_executable(

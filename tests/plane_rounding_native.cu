@@ -52,6 +52,24 @@ int main()
             if (result[plane * channels + channel] != (plane % 2 ? 0.4375f : 0.375f) ||
                 choices[channel] != 1 || bad != 0)
                 throw std::runtime_error("independent scalar cancellation witness failed");
+    std::int16_t* metadata;
+    check(cudaMalloc(&metadata, values.size() * sizeof(std::int16_t)));
+    std::vector<std::int16_t> packed(values.size(), 257);
+    check(cudaMemcpy(metadata, packed.data(), packed.size() * sizeof(std::int16_t),
+        cudaMemcpyHostToDevice));
+    check(cudaMemset(invalid, 0, sizeof(std::uint64_t)));
+    tensor_inference_engine::plane_shift_rounding(source, metadata, output, exponents, selected,
+        invalid, planes, 1, channels, 4, channels);
+    check(cudaDeviceSynchronize());
+    check(cudaMemcpy(result.data(), output, result.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    check(cudaMemcpy(choices.data(), selected, choices.size(), cudaMemcpyDeviceToHost));
+    check(cudaMemcpy(&bad, invalid, sizeof(bad), cudaMemcpyDeviceToHost));
+    for (int plane = 0; plane < planes; ++plane)
+        for (int channel = 0; channel < channels; ++channel)
+            if (result[plane * channels + channel] != (plane % 2 ? 0.4375f : 0.375f) ||
+                choices[channel] != 1 || bad != 0)
+                throw std::runtime_error("causal shift cancellation witness failed");
+    check(cudaFree(metadata));
     for (auto pointer : {source, factor, diagonal, output})
         check(cudaFree(pointer));
     check(cudaFree(exponents));
